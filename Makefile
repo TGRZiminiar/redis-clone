@@ -1,2 +1,6 @@
+build:
+	go build -o bin/redis-clone
 run:
-	go run main.go
+	go build -o bin/redis-clone
+	./bin/redis-clone
+# go run main.go
