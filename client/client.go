@@ -1,73 +1,67 @@
 package client
 
 import (
+	"bytes"
 	"context"
-	"fmt"
 	"net"
-	"tgrziminiar/redisclone/controller"
+
+	"github.com/tidwall/resp"
 )
 
-type (
-	Client struct {
-		conn net.Conn
-	}
-)
+type Client struct {
+	Addr string
+	conn net.Conn
+}
 
-func NewClient(url string) (*Client, error) {
-	conn, err := net.Dial("tcp", url)
+func NewClient(addr string) (*Client, error) {
+	conn, err := net.Dial("tcp", addr)
 	if err != nil {
 		return nil, err
 	}
 	return &Client{
+		Addr: addr,
 		conn: conn,
 	}, nil
 }
 
-func (c *Client) Get(ctx context.Context, key []byte) ([]byte, error) {
-	cmd := &controller.CommandGet{
-		Key: key,
-	}
+func (c *Client) Set(ctx context.Context, key string, val any) error {
+	buf := &bytes.Buffer{}
+	wr := resp.NewWriter(buf)
+	wr.WriteArray([]resp.Value{
+		resp.StringValue("SET"),
+		resp.StringValue(key),
+		resp.AnyValue(val),
+	})
 
-	_, err := c.conn.Write(cmd.Bytes())
-	if err != nil {
-		return nil, err
-	}
-
-	resp, err := controller.ParseGetResponse(c.conn)
-	if err != nil {
-		return nil, err
-	}
-	if resp.Status == controller.StatusNotFound {
-		return nil, fmt.Errorf("could not find key (%s)", key)
-	}
-	if resp.Status != controller.StatusOk {
-		return nil, fmt.Errorf("server responded with non OK status [%v]", resp.Status)
-	}
-
-	return resp.Value, nil
-}
-
-func (c *Client) Set(ctx context.Context, key []byte, value []byte, ttl int) error {
-	cmd := &controller.CommandSet{
-		Key:   key,
-		Value: value,
-		TTL:   ttl,
-	}
-
-	_, err := c.conn.Write(cmd.Bytes())
+	_, err := c.conn.Write(buf.Bytes())
+	// _, err := io.Copy(c.conn, buf)
 	if err != nil {
 		return err
-	}
-
-	resp, err := controller.ParseSetResponse(c.conn)
-	if err != nil {
-		return err
-	}
-	if resp.Status != controller.StatusOk {
-		return fmt.Errorf("server responsed with non OK status [%s]", resp.Status)
 	}
 
 	return nil
+}
+
+func (c *Client) Get(ctx context.Context, key string) (string, error) {
+	buf := &bytes.Buffer{}
+	wr := resp.NewWriter(buf)
+	wr.WriteArray([]resp.Value{
+		resp.StringValue("GET"),
+		resp.StringValue(key),
+	})
+
+	_, err := c.conn.Write(buf.Bytes())
+	// _, err := io.Copy(c.conn, buf)
+	if err != nil {
+		return "", err
+	}
+
+	bb := make([]byte, 1024)
+	n, err := c.conn.Read(bb)
+	if err != nil {
+		return "", err
+	}
+	return string(bb[:n]), nil
 }
 
 func (c *Client) Close() error {
